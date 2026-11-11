@@ -1,0 +1,31 @@
+# Python & Virtualenv
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+*.sqlite3
+*.db
+data/*.db
+!data/.gitkeep
+
+# Node & Next.js
+node_modules/
+.next/
+out/
+build/
+dist/
+.DS_Store
+*.local
+
+# Environment variables & secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
