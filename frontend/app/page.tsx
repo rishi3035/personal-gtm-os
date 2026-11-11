@@ -26,7 +26,8 @@ import {
   Copy,
   Check,
   X,
-  FileText
+  FileText,
+  Download
 } from "lucide-react";
 
 const API_BASE = "http://localhost:8000/api";
@@ -516,7 +517,7 @@ export default function Dashboard() {
         {/* Tab 1: Leads, Work Emails & Research */}
         {activeTab === "leads" && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="relative w-80">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                 <input
@@ -528,10 +529,33 @@ export default function Dashboard() {
                 />
               </div>
 
-              <div className="flex items-center space-x-2">
-                <span className="text-xs text-slate-400">
-                  Showing {filteredLeads.length} of {leads.length} leads
+              {/* Export Buttons & Count */}
+              <div className="flex items-center space-x-2.5">
+                <span className="text-xs text-slate-400 mr-1">
+                  Total: <strong className="text-white">{filteredLeads.length}</strong> / {leads.length}
                 </span>
+
+                <a
+                  href={`${API_BASE}/leads/export/excel`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm transition border border-emerald-400/30"
+                  title="Export multi-sheet Excel with Sheet 1 (Leads & Details) and Sheet 2 (Pitch Email Drafts)"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export Excel (2 Sheets)</span>
+                </a>
+
+                <a
+                  href={`${API_BASE}/leads/export/csv`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition"
+                  title="Export single CSV file"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Export CSV</span>
+                </a>
               </div>
             </div>
 
@@ -540,6 +564,7 @@ export default function Dashboard() {
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-950/70 border-b border-slate-800 text-slate-400 uppercase tracking-wider text-[11px]">
                     <tr>
+                      <th className="py-3 px-3 w-16 text-center">S.No</th>
                       <th className="py-3 px-4">Contact & Title</th>
                       <th className="py-3 px-4">Company & Domain</th>
                       <th className="py-3 px-4">Work Email (Visible)</th>
@@ -548,8 +573,11 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
-                    {filteredLeads.map((lead) => (
+                    {filteredLeads.map((lead, idx) => (
                       <tr key={lead.id} className="hover:bg-slate-850/50 transition-colors">
+                        <td className="py-3 px-3 text-center font-mono text-slate-400 text-xs font-semibold">
+                          {idx + 1}
+                        </td>
                         <td className="py-3 px-4">
                           <div className="font-semibold text-white">{lead.full_name}</div>
                           <div className="text-slate-400 text-[11px] line-clamp-1">{lead.job_title || "Tech Executive"}</div>
@@ -658,7 +686,7 @@ export default function Dashboard() {
 
                     {filteredLeads.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="py-8 text-center text-slate-400 text-xs">
+                        <td colSpan={6} className="py-8 text-center text-slate-400 text-xs">
                           No leads match the query.
                         </td>
                       </tr>
@@ -681,10 +709,22 @@ export default function Dashboard() {
                   directly in your email client (`mailto:`) or approve for automated SMTP dispatch.
                 </span>
               </div>
+
+              <div className="flex items-center space-x-2">
+                <a
+                  href={`${API_BASE}/leads/export/excel`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm transition border border-emerald-400/30"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download Excel</span>
+                </a>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {drafts.map((draft) => {
+              {drafts.map((draft, draftIdx) => {
                 const lead = leads.find((l) => l.id === draft.lead_id);
                 const mailtoUrl = lead?.email
                   ? `mailto:${lead.email}?subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.body_text)}`
@@ -697,9 +737,14 @@ export default function Dashboard() {
                   >
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-brand-500/10 text-brand-400 border border-brand-500/30">
-                          {draft.step === 0 ? "Observation Pitch" : draft.step === 1 ? "Day 3 • Value" : "Day 7 • Breakup"}
-                        </span>
+                        <div className="flex items-center space-x-2">
+                          <span className="font-mono text-xs font-bold text-slate-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                            #{draftIdx + 1}
+                          </span>
+                          <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-brand-500/10 text-brand-400 border border-brand-500/30">
+                            {draft.step === 0 ? "Observation Pitch" : draft.step === 1 ? "Day 3 • Value" : "Day 7 • Breakup"}
+                          </span>
+                        </div>
 
                         <span
                           className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${

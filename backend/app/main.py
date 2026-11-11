@@ -60,26 +60,8 @@ def seed_default_data():
             )
             db.add(hmw)
 
-        # 2. AiVi Campus OS workspace
-        campus = db.query(workspace.Workspace).filter(workspace.Workspace.slug == "aivi-campus-os").first()
-        if not campus:
-            campus = workspace.Workspace(
-                slug="aivi-campus-os",
-                name="AiVi Campus OS",
-                domain="aivicampus.com",
-                tagline="AI-Native Institutional Placement & Bilingual Telemetry Operating System",
-                target_audience="Colleges, universities, TPOs, Chancellors, and Higher Ed Institutions",
-                value_prop=(
-                    "Autonomous bilingual voice AI interview telemetry and automated NAAC 5.2.1 / NIRF compliance reporting. "
-                    "Zero-friction 5,000 student bulk CSV onboarding with deterministic ATS resume audit studio."
-                ),
-                pain_points="NAAC manual accreditation paralysis, conversational student anxiety in Purvanchal & Tier-2/3 campuses",
-                is_active=False
-            )
-            db.add(campus)
-
         db.commit()
-        logger.info("Default product workspaces verified.")
+        logger.info("HackMyWebsite product workspace verified.")
     finally:
         db.close()
 

@@ -1,6 +1,9 @@
 import json
+import csv
+import io
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -13,6 +16,7 @@ from app.schemas.lead import LeadResponse, LeadCreate, LeadStats
 from app.services.verifier_service import EmailVerifier
 from app.services.personalization_service import PersonalizationService
 from app.services.research_pitch_service import ResearchPitchService
+from app.services.export_service import ExportService
 
 router = APIRouter(prefix="/api/leads", tags=["Leads"])
 
@@ -324,4 +328,65 @@ def select_lead_email(lead_id: int, payload: SelectEmailRequest, db: Session = D
         "selected_email": lead.email,
         "email_status": lead.email_status
     }
+
+@router.get("/export/excel")
+def export_leads_excel(workspace_id: int = 1, db: Session = Depends(get_db)):
+    """
+    Exports a multi-sheet Excel (.xlsx) file:
+    Sheet 1: Leads & Details (with S.No)
+    Sheet 2: Pitch Email Drafts (with S.No, Subject, and Body)
+    """
+    stream = ExportService.generate_excel_workbook(workspace_id=workspace_id, db=db)
+    filename = "HackMyWebsite_Leads_and_Pitches.xlsx"
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+@router.get("/export/csv")
+def export_leads_csv(workspace_id: int = 1, db: Session = Depends(get_db)):
+    """
+    Exports a CSV file of all leads and their primary pitch drafts with S.No.
+    """
+    leads = db.query(Lead).filter(Lead.workspace_id == workspace_id).order_by(Lead.id.asc()).all()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    headers = [
+        "S.No", "Lead ID", "Full Name", "First Name", "Last Name",
+        "Job Title", "Company Name", "Inferred Domain", "Location",
+        "LinkedIn URL", "Work Email", "Email Status",
+        "Pitch Subject Line", "Pitch Email Body", "Strategy Angle"
+    ]
+    writer.writerow(headers)
+
+    for idx, l in enumerate(leads, 1):
+        draft = db.query(EmailDraft).filter(EmailDraft.lead_id == l.id, EmailDraft.step == 0).first()
+        writer.writerow([
+            idx,
+            l.id,
+            l.full_name,
+            l.first_name,
+            l.last_name,
+            l.job_title,
+            l.company_name,
+            l.company_domain,
+            ", ".join(filter(None, [l.city, l.state, l.country])),
+            l.linkedin_url,
+            l.email or "",
+            l.email_status,
+            draft.subject if draft else "",
+            draft.body_text if draft else "",
+            draft.hook_rationale if draft else ""
+        ])
+
+    output.seek(0)
+    filename = "HackMyWebsite_Leads_and_Pitches.csv"
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
 
