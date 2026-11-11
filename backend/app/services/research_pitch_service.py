@@ -4,116 +4,146 @@ import re
 from typing import Dict, Any, List
 from app.models.lead import Lead
 from app.models.workspace import Workspace
-from app.models.email import EmailDraft
 
 logger = logging.getLogger(__name__)
 
 class ResearchPitchService:
     @staticmethod
-    def analyze_company_and_role(lead: Lead) -> Dict[str, Any]:
+    def classify_lead_segment(lead: Lead) -> str:
         """
-        Synthesizes research intelligence about the lead's company, industry, and role.
-        Determines the optimal DevSecOps / HackMyWebsite pitch angle.
+        Classifies lead into one of the 3 proven segment strategies from session 0f9221c6-4e53-46d6-8cde-c1787c0be2b9:
+        1. 'agency': Web & App Development Studios, Infotech, Digital Consultancies
+        2. 'ecommerce': Ecommerce Studios, Shopify / Headless Platforms
+        3. 'boutique': Founder-led AI/Tech Studios, Solo Founders & SaaS Startups
         """
-        company = (lead.company_name or "").strip()
-        domain = (lead.company_domain or "").strip()
-        title = (lead.job_title or "").strip()
-        full_name = (lead.full_name or "").strip()
-        first_name = (lead.first_name or (full_name.split()[0] if full_name else "there")).strip()
-        
-        comp_lower = company.lower()
-        title_lower = title.lower()
+        company_lower = (lead.company_name or "").lower()
+        title_lower = (lead.job_title or "").lower()
 
-        # Classify business model
-        if any(w in comp_lower for w in ["agency", "studio", "infotech", "technologies", "techstack", "solutions", "services", "digital", "consulting", "interactive", "media"]):
-            category = "Digital Agency & Software Services"
-            business_model = "Client Web & App Development"
-            security_risk = "Shipping client web applications on tight sprint schedules where manual pen-testing is skipped due to high cost ($3,000+) and slow turnaround."
-            angle = "Agency Client Security Assurance & Rapid Staging Scans"
-            cta_prompt = f"run a test vulnerability scan on one of {company}'s client staging or production URLs"
-        elif any(w in comp_lower for w in ["ai", "labs", "tech", "box", "peers", "ctc", "push", "flow", "saas", "app"]):
-            category = "Tech Startup / B2B SaaS"
-            business_model = "Product & Platform Engineering"
-            security_risk = "Exposing sensitive customer data or APIs through rapid continuous deployments without automated CI/CD security gates."
-            angle = "Autonomous GitHub PR Security Gate & DAST Scanning"
-            cta_prompt = f"benchmark {domain or company}'s web endpoints in under 90 seconds"
+        if any(w in company_lower for w in ["shopify", "commerce", "store", "retail", "cart", "brand"]):
+            return "ecommerce"
+        elif any(w in company_lower for w in [
+            "agency", "studio", "infotech", "technologies", "techstack",
+            "solutions", "services", "digital", "consulting", "interactive",
+            "media", "software", "development", "it services", "enterprises"
+        ]):
+            return "agency"
         else:
-            category = "Technology Business"
-            business_model = "Commercial Web Infrastructure"
-            security_risk = "Unpatched web vulnerabilities, misconfigured CORS/CSP headers, and exposed staging subdomains."
-            angle = "OWASP Top 10 Continuous Defense"
-            cta_prompt = f"see a complimentary baseline vulnerability report for {domain or company}"
-
-        # Classify executive perspective
-        if any(w in title_lower for w in ["coo", "chief operating officer", "operations"]):
-            executive_focus = "Operational efficiency, reducing delivery risk, and avoiding client breach liability."
-        elif any(w in title_lower for w in ["cto", "chief technology officer", "vp engineering", "head of tech", "technical"]):
-            executive_focus = "Developer workflow integration, GitHub PR gates, and zero-overhead DAST/SAST automation."
-        elif any(w in title_lower for w in ["founder", "ceo", "co-founder", "director", "managing director", "partner"]):
-            executive_focus = "Safeguarding company brand reputation, client trust, and closing enterprise deals with proof of security."
-        else:
-            executive_focus = "Automated web application security auditing with zero engineering friction."
-
-        findings = [
-            f"Company operates in {category} with primary focus on {business_model}.",
-            f"Key operational friction: {security_risk}",
-            f"Executive vantage ({title}): Prioritizes {executive_focus}",
-            f"Recommended Attack Surface target: {domain if domain else company.lower().replace(' ', '') + '.com'}"
-        ]
-
-        return {
-            "first_name": first_name,
-            "company_name": company,
-            "domain": domain,
-            "category": category,
-            "business_model": business_model,
-            "angle": angle,
-            "executive_focus": executive_focus,
-            "security_risk": security_risk,
-            "cta_prompt": cta_prompt,
-            "key_findings": findings
-        }
+            return "boutique"
 
     @classmethod
     def generate_research_pitch(cls, lead: Lead, workspace: Workspace) -> Dict[str, Any]:
         """
-        Generates research dossier and a ready-to-send HackMyWebsite pitch email.
+        Synthesizes research and generates the high-converting 6-block cold email strategy
+        calibrated directly from session 0f9221c6-4e53-46d6-8cde-c1787c0be2b9.
         """
-        analysis = cls.analyze_company_and_role(lead)
-        first_name = analysis["first_name"]
-        company = analysis["company_name"]
-        domain = analysis["domain"] or f"{company.lower().replace(' ', '')}.com"
-        title = lead.job_title or "tech leader"
-
-        # Construct authentic, human-written pitch email
-        subject = f"{company}'s client web builds & automated security"
+        full_name = (lead.full_name or "").strip()
+        first_name = (lead.first_name or (full_name.split()[0] if full_name else "there")).strip()
+        company = (lead.company_name or "your team").strip()
+        domain = (lead.company_domain or f"{company.lower().replace(' ', '')}.com").strip()
+        title = (lead.job_title or "tech leader").strip()
         
+        segment = cls.classify_lead_segment(lead)
+
+        if segment == "ecommerce":
+            subject = f"Custom code security and retainer profit for {company}"
+            hook = f"Really impressed with the scalable web applications and digital commerce systems your team builds at {company}."
+            problem = (
+                f"Quick question for you. When your developers build fast and integrate custom APIs, plugins, "
+                f"or headless storefronts, how do you handle security validation before client handoff?\n\n"
+                f"Even with great QA, small perimeter vulnerabilities, open endpoints, and header gaps easily "
+                f"slip into production, putting client data at risk."
+            )
+            solution = (
+                f"We built Hack My Website (https://hackmywebsite.io) to slot directly into your delivery pipeline: "
+                f"development, QA, five minute automated scan, Launch Score, and client handoff.\n\n"
+                f"It flags perimeter risks in seconds and gives your team ready prompts to copy-paste into Cursor or Claude "
+                f"to patch things immediately."
+            )
+            profit = (
+                f"The big win for {company} is pure profit:\n\n"
+                f"1. One Time Handover Profit: You brand the audit PDF with your own logo and sell it as a certified launch security clearance for an extra ₹30,000 to ₹50,000 on the final project invoice.\n"
+                f"2. Recurring Retainer Profit: You roll it into your monthly maintenance packages as continuous security monitoring for ₹20,000 to ₹40,000 monthly, with zero extra engineering headcount."
+            )
+            cta = "Attached is our 1-page overview memo. Would you be open to a quick 5 to 10 minute call this Thursday or Friday to see a sample white label report?"
+            category = "Ecommerce & Digital Solutions Studio"
+            pitch_angle = "Headless Custom Code Security & Retainer Monetization"
+
+        elif segment == "boutique":
+            subject = f"Automated security validation before client handover at {company}"
+            hook = f"Love what you and the team are shipping as a focused engineering team at {company}."
+            problem = (
+                f"Quick question for you. When your developers build fast with AI coding tools like Cursor or Claude, "
+                f"how do you handle perimeter security before deployment?\n\n"
+                f"Hiring an outside penetration tester makes zero sense for a high-velocity team: it costs ₹1.5L to ₹5.0L "
+                f"($2,000+), takes 2 to 3 weeks, and yields 50-page reports that developers never read."
+            )
+            solution = (
+                f"We built Hack My Website (https://hackmywebsite.io) to solve this in five minutes.\n\n"
+                f"You run an automated scan on staging in under 90 seconds, catch OWASP Top 10 risks and exposed secrets, "
+                f"and get ready prompts to copy-paste into Cursor or Claude to patch them immediately."
+            )
+            profit = (
+                f"For client work, you can brand the audit PDF with your own logo as a verified Launch Security Clearance, "
+                f"adding an instant ₹30,000 to ₹50,000 in delivery margin or monthly retainers."
+            )
+            cta = "Attached is our 1-page overview memo. Would you be up for a brief 5 to 10 minute catch up Thursday or Friday to see how it works?"
+            category = "High-Velocity Tech & Product Studio"
+            pitch_angle = "AI Code Risk Elimination & 90-Second IDE Prompts"
+
+        else: # Standard Agency / Infotech / Dev Studio
+            subject = f"Turning web client handoffs into ₹50k/mo recurring agency revenue"
+            hook = f"Really like the custom web applications and client builds your team ships at {company}."
+            problem = (
+                f"Quick question for you. When your developers build fast and copy-paste code from Claude or integrate third party plugins, "
+                f"how do you handle security validation before client handoff?\n\n"
+                f"Even with great QA, small perimeter vulnerabilities, open endpoints, and header gaps easily slip into production, "
+                f"putting client data at risk."
+            )
+            solution = (
+                f"We built Hack My Website (https://hackmywebsite.io) to slot directly into your delivery pipeline: "
+                f"development, QA, five minute automated scan, Launch Score, and client handoff.\n\n"
+                f"It flags perimeter risks in seconds and gives your team ready prompts to copy-paste into Cursor or Claude "
+                f"to patch things immediately."
+            )
+            profit = (
+                f"The big win for {company} is pure profit:\n\n"
+                f"1. One Time Handover Profit: You brand the audit PDF with your own logo and sell it as a certified launch security clearance for an extra ₹30,000 to ₹50,000 on the final project invoice.\n"
+                f"2. Recurring Retainer Profit: You roll it into your monthly maintenance packages as continuous security monitoring for ₹20,000 to ₹40,000 monthly, with zero extra engineering headcount."
+            )
+            cta = "Attached is our 1-page overview memo. Would you be open to a quick 5 to 10 minute call this Thursday or Friday to see a sample white label report?"
+            category = "Web & App Development Agency"
+            pitch_angle = "Agency White-Label Security Handover Engine (₹50k/mo Upsell)"
+
+        # Assemble full authentic human-written body text
         body_text = (
             f"Hi {first_name},\n\n"
-            f"Saw your work leading {company}. As {title}, I imagine keeping web applications secure before "
-            f"deployments is a recurring priority—especially when client deadlines are tight.\n\n"
-            f"Most teams we speak with tell us traditional penetration testing has become a major bottleneck: "
-            f"it costs $3,000+ per manual engagement and takes 2 to 3 weeks to get results. Because of that delay, "
-            f"staging endpoints and production releases often go live with unverified OWASP risks or misconfigured headers.\n\n"
-            f"We built HackMyWebsite (https://hackmywebsite.io) to solve this. It is an autonomous DevSecOps scanner "
-            f"that crawls and runs full DAST and SAST vulnerability scans across web builds in under 90 seconds, "
-            f"giving you instant remediation steps without needing dedicated security staff.\n\n"
-            f"Would you be open to running a quick test scan on one of {company}'s staging or public URLs to see "
-            f"what it surfaces?\n\n"
-            f"Best,\n"
+            f"{hook}\n\n"
+            f"{problem}\n\n"
+            f"{solution}\n\n"
+            f"{profit}\n\n"
+            f"{cta}\n\n"
+            f"Best regards,\n\n"
             f"Rishikesh Raj\n"
-            f"COO, AIVI Intelligence | HackMyWebsite\n"
-            f"rishikesh@aiviintelligence.com | https://hackmywebsite.io"
+            f"Chief Operating Officer\n"
+            f"AIVI Intelligence Private Limited\n"
+            f"E: rishikesh@aiviintelligence.com\n"
+            f"W: https://aiviintelligence.com | https://hackmywebsite.io"
         )
 
         dossier = {
-            "category": analysis["category"],
-            "business_model": analysis["business_model"],
-            "pitch_angle": analysis["angle"],
+            "category": category,
+            "segment": segment,
+            "business_model": "Client Project Delivery & Tech Infrastructure",
+            "pitch_angle": pitch_angle,
             "target_domain": domain,
-            "executive_focus": analysis["executive_focus"],
-            "findings": analysis["key_findings"],
-            "recommended_next_step": "Dispatch initial observation pitch via Gmail or SMTP"
+            "executive_focus": f"Delivery margins, client data protection, and white-label retainer revenue for {title}.",
+            "findings": [
+                f"Company segment: {category} ({company})",
+                f"Primary monetization angle: {pitch_angle}",
+                f"Remediation hook: Automated 90-sec DAST/SAST scan + 1-click Cursor/Claude AST prompt fixes",
+                f"Agency upsell capability: ₹30,000–₹50,000 one-time clearance fee + ₹20,000–₹40,000/mo retainer"
+            ],
+            "recommended_next_step": "Dispatch outreach pitch via email client or GTM OS review gate"
         }
 
         return {
@@ -122,6 +152,6 @@ class ResearchPitchService:
                 "recipient": lead.email,
                 "subject": subject,
                 "body_text": body_text,
-                "hook_rationale": f"Targeted at {analysis['angle']} highlighting 90-second automated scans vs $3,000 manual pen-tests."
+                "hook_rationale": f"Calibrated 6-block B2B strategy for {segment}: {pitch_angle}"
             }
         }
