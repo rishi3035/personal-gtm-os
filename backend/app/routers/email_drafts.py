@@ -15,7 +15,7 @@ def list_drafts(
     lead_id: Optional[int] = None,
     status: Optional[str] = None,
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(1000, ge=1, le=2000),
     db: Session = Depends(get_db)
 ):
     query = db.query(EmailDraft)
@@ -25,7 +25,7 @@ def list_drafts(
         query = query.filter(EmailDraft.lead_id == lead_id)
     if status:
         query = query.filter(EmailDraft.status == status)
-    return query.order_by(EmailDraft.id.desc()).offset(skip).limit(limit).all()
+    return query.order_by(EmailDraft.id.asc()).offset(skip).limit(limit).all()
 
 @router.put("/{draft_id}/approve")
 def approve_draft(

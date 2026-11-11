@@ -36,7 +36,7 @@ def list_leads(
     outreach_status: Optional[str] = None,
     search: Optional[str] = None,
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(1000, ge=1, le=2000),
     db: Session = Depends(get_db)
 ):
     query = db.query(Lead)
@@ -56,7 +56,7 @@ def list_leads(
                 Lead.job_title.ilike(s)
             )
         )
-    return query.order_by(Lead.id.desc()).offset(skip).limit(limit).all()
+    return query.order_by(Lead.id.asc()).offset(skip).limit(limit).all()
 
 @router.get("/{lead_id}", response_model=LeadResponse)
 def get_lead(lead_id: int, db: Session = Depends(get_db)):

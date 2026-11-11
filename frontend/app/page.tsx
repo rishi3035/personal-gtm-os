@@ -113,6 +113,19 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  // Pagination State for Leads
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+
+  // Pagination State for Drafts
+  const [draftPage, setDraftPage] = useState(1);
+  const [draftPageSize, setDraftPageSize] = useState(50);
+
+  // Reset to page 1 on search or page size change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, pageSize]);
+
   // Research & Pitch Modal
   const [pitchModalLead, setPitchModalLead] = useState<Lead | null>(null);
   const [pitchModalDossier, setPitchModalDossier] = useState<any>(null);
@@ -162,8 +175,8 @@ export default function Dashboard() {
     try {
       const [sRes, lRes, dRes] = await Promise.all([
         fetch(`${API_BASE}/workspaces/${wsId}/stats`),
-        fetch(`${API_BASE}/leads?workspace_id=${wsId}&limit=100`),
-        fetch(`${API_BASE}/drafts?workspace_id=${wsId}&limit=100`),
+        fetch(`${API_BASE}/leads?workspace_id=${wsId}&limit=1000`),
+        fetch(`${API_BASE}/drafts?workspace_id=${wsId}&limit=1000`),
       ]);
       setStats(await sRes.json());
       setLeads(await lRes.json());
@@ -313,6 +326,16 @@ export default function Dashboard() {
       l.city?.toLowerCase().includes(q)
     );
   });
+
+  // Paginated Leads
+  const totalLeadPages = Math.max(1, Math.ceil(filteredLeads.length / pageSize));
+  const startLeadIndex = (currentPage - 1) * pageSize;
+  const paginatedLeads = filteredLeads.slice(startLeadIndex, startLeadIndex + pageSize);
+
+  // Paginated Drafts
+  const totalDraftPages = Math.max(1, Math.ceil(drafts.length / draftPageSize));
+  const startDraftIndex = (draftPage - 1) * draftPageSize;
+  const paginatedDrafts = drafts.slice(startDraftIndex, startDraftIndex + draftPageSize);
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-950 text-slate-100">
@@ -573,10 +596,10 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
-                    {filteredLeads.map((lead, idx) => (
+                    {paginatedLeads.map((lead, idx) => (
                       <tr key={lead.id} className="hover:bg-slate-850/50 transition-colors">
                         <td className="py-3 px-3 text-center font-mono text-slate-400 text-xs font-semibold">
-                          {idx + 1}
+                          {startLeadIndex + idx + 1}
                         </td>
                         <td className="py-3 px-4">
                           <div className="font-semibold text-white">{lead.full_name}</div>
@@ -694,6 +717,92 @@ export default function Dashboard() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Pagination Controls */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 bg-slate-950/80 border-t border-slate-800 text-xs">
+                <div className="flex items-center space-x-3 text-slate-400">
+                  <span>
+                    Showing <strong className="text-white">{filteredLeads.length === 0 ? 0 : startLeadIndex + 1}</strong> to{" "}
+                    <strong className="text-white">{Math.min(startLeadIndex + pageSize, filteredLeads.length)}</strong> of{" "}
+                    <strong className="text-white">{filteredLeads.length}</strong> leads
+                  </span>
+
+                  <div className="flex items-center space-x-1.5 ml-3">
+                    <span>Page Size:</span>
+                    <select
+                      value={pageSize}
+                      onChange={(e) => {
+                        setPageSize(Number(e.target.value));
+                        setCurrentPage(1);
+                      }}
+                      className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                    >
+                      <option value={50}>50 / page</option>
+                      <option value={100}>100 / page</option>
+                      <option value={200}>200 / page</option>
+                      <option value={500}>500 / page</option>
+                      <option value={1000}>1000 (All Leads)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Page Navigation Buttons */}
+                <div className="flex items-center space-x-1.5">
+                  <button
+                    onClick={() => setCurrentPage(1)}
+                    disabled={currentPage === 1}
+                    className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-800"
+                    title="First Page"
+                  >
+                    &laquo; First
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-800"
+                  >
+                    &lsaquo; Prev
+                  </button>
+
+                  <div className="flex items-center space-x-1">
+                    {Array.from({ length: totalLeadPages }, (_, i) => i + 1)
+                      .filter((p) => p === 1 || p === totalLeadPages || Math.abs(p - currentPage) <= 2)
+                      .map((p, pIdx, arr) => (
+                        <React.Fragment key={p}>
+                          {pIdx > 0 && arr[pIdx - 1] !== p - 1 && (
+                            <span className="text-slate-600 px-1">...</span>
+                          )}
+                          <button
+                            onClick={() => setCurrentPage(p)}
+                            className={`w-7 h-7 rounded text-xs font-semibold transition ${
+                              currentPage === p
+                                ? "bg-brand-600 text-white shadow"
+                                : "bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800"
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        </React.Fragment>
+                      ))}
+                  </div>
+
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.min(totalLeadPages, p + 1))}
+                    disabled={currentPage === totalLeadPages}
+                    className="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-800"
+                  >
+                    Next &rsaquo;
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage(totalLeadPages)}
+                    disabled={currentPage === totalLeadPages}
+                    className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-800"
+                    title="Last Page"
+                  >
+                    Last &raquo;
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -724,7 +833,7 @@ export default function Dashboard() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {drafts.map((draft, draftIdx) => {
+              {paginatedDrafts.map((draft, draftIdx) => {
                 const lead = leads.find((l) => l.id === draft.lead_id);
                 const mailtoUrl = lead?.email
                   ? `mailto:${lead.email}?subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.body_text)}`
@@ -739,7 +848,7 @@ export default function Dashboard() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2">
                           <span className="font-mono text-xs font-bold text-slate-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
-                            #{draftIdx + 1}
+                            #{startDraftIndex + draftIdx + 1}
                           </span>
                           <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-brand-500/10 text-brand-400 border border-brand-500/30">
                             {draft.step === 0 ? "Observation Pitch" : draft.step === 1 ? "Day 3 • Value" : "Day 7 • Breakup"}
@@ -839,6 +948,91 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
+
+            {/* Drafts Pagination Controls */}
+            {drafts.length > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 bg-slate-900 border border-slate-800 rounded-xl text-xs">
+                <div className="flex items-center space-x-3 text-slate-400">
+                  <span>
+                    Showing <strong className="text-white">{startDraftIndex + 1}</strong> to{" "}
+                    <strong className="text-white">{Math.min(startDraftIndex + draftPageSize, drafts.length)}</strong> of{" "}
+                    <strong className="text-white">{drafts.length}</strong> pitch drafts
+                  </span>
+
+                  <div className="flex items-center space-x-1.5 ml-3">
+                    <span>Drafts per page:</span>
+                    <select
+                      value={draftPageSize}
+                      onChange={(e) => {
+                        setDraftPageSize(Number(e.target.value));
+                        setDraftPage(1);
+                      }}
+                      className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                    >
+                      <option value={24}>24 / page</option>
+                      <option value={48}>48 / page</option>
+                      <option value={96}>96 / page</option>
+                      <option value={500}>500 / page</option>
+                      <option value={1000}>All 1,000</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-1.5">
+                  <button
+                    onClick={() => setDraftPage(1)}
+                    disabled={draftPage === 1}
+                    className="px-2 py-1 rounded bg-slate-950 border border-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-800"
+                  >
+                    &laquo; First
+                  </button>
+                  <button
+                    onClick={() => setDraftPage((p) => Math.max(1, p - 1))}
+                    disabled={draftPage === 1}
+                    className="px-2.5 py-1 rounded bg-slate-950 border border-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-800"
+                  >
+                    &lsaquo; Prev
+                  </button>
+
+                  <div className="flex items-center space-x-1">
+                    {Array.from({ length: totalDraftPages }, (_, i) => i + 1)
+                      .filter((p) => p === 1 || p === totalDraftPages || Math.abs(p - draftPage) <= 2)
+                      .map((p, pIdx, arr) => (
+                        <React.Fragment key={p}>
+                          {pIdx > 0 && arr[pIdx - 1] !== p - 1 && (
+                            <span className="text-slate-600 px-1">...</span>
+                          )}
+                          <button
+                            onClick={() => setDraftPage(p)}
+                            className={`w-7 h-7 rounded text-xs font-semibold transition ${
+                              draftPage === p
+                                ? "bg-brand-600 text-white shadow"
+                                : "bg-slate-950 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800"
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        </React.Fragment>
+                      ))}
+                  </div>
+
+                  <button
+                    onClick={() => setDraftPage((p) => Math.min(totalDraftPages, p + 1))}
+                    disabled={draftPage === totalDraftPages}
+                    className="px-2.5 py-1 rounded bg-slate-950 border border-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-800"
+                  >
+                    Next &rsaquo;
+                  </button>
+                  <button
+                    onClick={() => setDraftPage(totalDraftPages)}
+                    disabled={draftPage === totalDraftPages}
+                    className="px-2 py-1 rounded bg-slate-950 border border-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-800"
+                  >
+                    Last &raquo;
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
