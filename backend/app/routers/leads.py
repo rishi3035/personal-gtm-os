@@ -1,5 +1,7 @@
+import json
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from datetime import datetime
@@ -10,8 +12,18 @@ from app.models.email import EmailDraft
 from app.schemas.lead import LeadResponse, LeadCreate, LeadStats
 from app.services.verifier_service import EmailVerifier
 from app.services.personalization_service import PersonalizationService
+from app.services.research_pitch_service import ResearchPitchService
 
 router = APIRouter(prefix="/api/leads", tags=["Leads"])
+
+class SelectEmailRequest(BaseModel):
+    email: str
+    status: Optional[str] = "selected"
+
+class BatchResearchRequest(BaseModel):
+    workspace_id: int = 1
+    limit: int = 20
+
 
 @router.get("", response_model=List[LeadResponse])
 def list_leads(
@@ -172,3 +184,144 @@ def generate_drafts(lead_id: int, db: Session = Depends(get_db)):
         "draft_ids": created_drafts,
         "count": len(created_drafts)
     }
+
+@router.post("/{lead_id}/research-and-pitch")
+def research_and_pitch_lead(lead_id: int, db: Session = Depends(get_db)):
+    """
+    Performs company & role intelligence analysis and generates a ready-to-send
+    HackMyWebsite pitch email for the lead.
+    """
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    workspace = db.query(Workspace).filter(Workspace.id == lead.workspace_id).first()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    # Generate research dossier & ready-to-send pitch
+    result = ResearchPitchService.generate_research_pitch(lead, workspace)
+    dossier = result["dossier"]
+    pitch = result["pitch_email"]
+
+    # Save dossier as JSON in enrichment_data
+    lead.enrichment_data = json.dumps(dossier, ensure_ascii=False)
+    lead.outreach_status = "researched"
+
+    # Save or update step 0 draft
+    draft = db.query(EmailDraft).filter(
+        EmailDraft.lead_id == lead.id,
+        EmailDraft.step == 0
+    ).first()
+
+    if not draft:
+        draft = EmailDraft(
+            workspace_id=workspace.id,
+            lead_id=lead.id,
+            step=0,
+            subject=pitch["subject"],
+            body_text=pitch["body_text"],
+            hook_rationale=pitch["hook_rationale"],
+            status="draft"
+        )
+        db.add(draft)
+    else:
+        if draft.status == "draft":
+            draft.subject = pitch["subject"]
+            draft.body_text = pitch["body_text"]
+            draft.hook_rationale = pitch["hook_rationale"]
+
+    db.commit()
+    db.refresh(lead)
+
+    return {
+        "status": "success",
+        "lead_id": lead.id,
+        "full_name": lead.full_name,
+        "company": lead.company_name,
+        "work_email": lead.email,
+        "dossier": dossier,
+        "pitch_email": {
+            "draft_id": draft.id if draft else None,
+            "recipient": lead.email,
+            "subject": draft.subject if draft else pitch["subject"],
+            "body_text": draft.body_text if draft else pitch["body_text"],
+            "status": draft.status if draft else "draft"
+        }
+    }
+
+@router.post("/batch-research")
+def batch_research(payload: BatchResearchRequest, db: Session = Depends(get_db)):
+    """
+    Runs research and ready-to-send pitch generation across a batch of leads in the workspace.
+    """
+    workspace = db.query(Workspace).filter(Workspace.id == payload.workspace_id).first()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    leads = db.query(Lead).filter(
+        Lead.workspace_id == payload.workspace_id
+    ).limit(payload.limit).all()
+
+    researched_count = 0
+    for lead in leads:
+        result = ResearchPitchService.generate_research_pitch(lead, workspace)
+        dossier = result["dossier"]
+        pitch = result["pitch_email"]
+
+        lead.enrichment_data = json.dumps(dossier, ensure_ascii=False)
+        if lead.outreach_status == "new":
+            lead.outreach_status = "researched"
+
+        draft = db.query(EmailDraft).filter(
+            EmailDraft.lead_id == lead.id,
+            EmailDraft.step == 0
+        ).first()
+
+        if not draft:
+            draft = EmailDraft(
+                workspace_id=workspace.id,
+                lead_id=lead.id,
+                step=0,
+                subject=pitch["subject"],
+                body_text=pitch["body_text"],
+                hook_rationale=pitch["hook_rationale"],
+                status="draft"
+            )
+            db.add(draft)
+        else:
+            if draft.status == "draft":
+                draft.subject = pitch["subject"]
+                draft.body_text = pitch["body_text"]
+                draft.hook_rationale = pitch["hook_rationale"]
+
+        researched_count += 1
+
+    db.commit()
+    return {
+        "status": "success",
+        "workspace_id": payload.workspace_id,
+        "researched_count": researched_count
+    }
+
+@router.put("/{lead_id}/select-email")
+def select_lead_email(lead_id: int, payload: SelectEmailRequest, db: Session = Depends(get_db)):
+    """
+    Updates the active work email for a lead and syncs all associated drafts.
+    """
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    lead.email = payload.email.strip().lower()
+    lead.email_status = payload.status or "selected"
+    db.commit()
+    db.refresh(lead)
+
+    return {
+        "status": "success",
+        "lead_id": lead.id,
+        "selected_email": lead.email,
+        "email_status": lead.email_status
+    }
+

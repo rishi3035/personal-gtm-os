@@ -15,26 +15,29 @@ import {
   Search,
   ExternalLink,
   ChevronRight,
+  ChevronDown,
   Sparkles,
   ArrowRight,
   Filter,
   Eye,
   Sliders,
   Trash2,
-  UserX
+  UserX,
+  Copy,
+  Check,
+  X,
+  FileText
 } from "lucide-react";
 
 const API_BASE = "http://localhost:8000/api";
 
-interface Workspace {
+interface Candidate {
   id: number;
-  slug: string;
-  name: string;
-  domain: string;
-  tagline: string;
-  target_audience: string;
-  value_prop: string;
-  is_active: boolean;
+  email: string;
+  pattern: string;
+  status: string;
+  mx_found: boolean;
+  smtp_code: number | null;
 }
 
 interface Lead {
@@ -55,14 +58,19 @@ interface Lead {
   email_status: string;
   email_score: number;
   outreach_status: string;
-  candidates: {
-    id: number;
-    email: string;
-    pattern: string;
-    status: string;
-    mx_found: boolean;
-    smtp_code: number | null;
-  }[];
+  enrichment_data: string | null;
+  candidates: Candidate[];
+}
+
+interface Workspace {
+  id: number;
+  slug: string;
+  name: string;
+  domain: string;
+  tagline: string;
+  target_audience: string;
+  value_prop: string;
+  is_active: boolean;
 }
 
 interface EmailDraft {
@@ -98,26 +106,37 @@ export default function Dashboard() {
   });
   const [leads, setLeads] = useState<Lead[]>([]);
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
-  const [activeTab, setActiveTab] = useState<"leads" | "drafts" | "clay" | "operator" | "suppression">("leads");
+  const [activeTab, setActiveTab] = useState<"leads" | "drafts" | "operator" | "suppression">("leads");
   const [loading, setLoading] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Clay Modal / State
-  const [clayTables, setClayTables] = useState<any[]>([]);
-  const [clayImportLimit, setClayImportLimit] = useState(10);
+  // Research & Pitch Modal
+  const [pitchModalLead, setPitchModalLead] = useState<Lead | null>(null);
+  const [pitchModalDossier, setPitchModalDossier] = useState<any>(null);
+  const [pitchModalEmail, setPitchModalEmail] = useState<{
+    subject: string;
+    body_text: string;
+    recipient: string;
+    draft_id?: number;
+    status?: string;
+  } | null>(null);
+  const [pitchLoading, setPitchLoading] = useState(false);
+
+  // Clay Import State
   const [clayImporting, setClayImporting] = useState(false);
+  const [batchResearching, setBatchResearching] = useState(false);
 
   // Operator State
   const [operatorProfile, setOperatorProfile] = useState<any>(null);
 
-  // Fetch workspaces on mount
+  // Fetch initial data
   useEffect(() => {
     fetchWorkspaces();
     fetchOperatorProfile();
   }, []);
 
-  // When workspace changes, fetch stats, leads, drafts
   useEffect(() => {
     if (currentWs) {
       loadWorkspaceData(currentWs.id);
@@ -140,20 +159,14 @@ export default function Dashboard() {
   const loadWorkspaceData = async (wsId: number) => {
     setLoading(true);
     try {
-      // 1. Stats
-      const sRes = await fetch(`${API_BASE}/workspaces/${wsId}/stats`);
-      const sData = await sRes.json();
-      setStats(sData);
-
-      // 2. Leads
-      const lRes = await fetch(`${API_BASE}/leads?workspace_id=${wsId}&limit=100`);
-      const lData = await lRes.json();
-      setLeads(lData);
-
-      // 3. Drafts
-      const dRes = await fetch(`${API_BASE}/drafts?workspace_id=${wsId}`);
-      const dData = await dRes.json();
-      setDrafts(dData);
+      const [sRes, lRes, dRes] = await Promise.all([
+        fetch(`${API_BASE}/workspaces/${wsId}/stats`),
+        fetch(`${API_BASE}/leads?workspace_id=${wsId}&limit=100`),
+        fetch(`${API_BASE}/drafts?workspace_id=${wsId}&limit=100`),
+      ]);
+      setStats(await sRes.json());
+      setLeads(await lRes.json());
+      setDrafts(await dRes.json());
     } catch (e) {
       console.error("Error loading workspace data", e);
     } finally {
@@ -164,16 +177,64 @@ export default function Dashboard() {
   const fetchOperatorProfile = async () => {
     try {
       const res = await fetch(`${API_BASE}/operator`);
-      const data = await res.json();
-      setOperatorProfile(data);
+      setOperatorProfile(await res.json());
     } catch (e) {
       console.error("Error fetching operator profile", e);
     }
   };
 
+  const copyToClipboard = (text: string, idKey: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(idKey);
+    setTimeout(() => setCopiedId(null), 2500);
+  };
+
+  const handleOpenPitchModal = async (lead: Lead) => {
+    setPitchModalLead(lead);
+    setPitchLoading(true);
+
+    try {
+      // Check if research already exists
+      const res = await fetch(`${API_BASE}/leads/${lead.id}/research-and-pitch`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      setPitchModalDossier(data.dossier);
+      setPitchModalEmail(data.pitch_email);
+
+      // Refresh lead in state
+      if (currentWs) loadWorkspaceData(currentWs.id);
+    } catch (e) {
+      setActionMessage(`Error generating pitch: ${e}`);
+    } finally {
+      setPitchLoading(false);
+    }
+  };
+
+  const handleSelectCandidateEmail = async (leadId: number, email: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/leads/${leadId}/select-email`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, status: "selected" }),
+      });
+      const data = await res.json();
+      setActionMessage(`Updated work email for Lead #${leadId} to: ${data.selected_email}`);
+      if (pitchModalLead && pitchModalLead.id === leadId) {
+        setPitchModalLead({ ...pitchModalLead, email: data.selected_email });
+        if (pitchModalEmail) {
+          setPitchModalEmail({ ...pitchModalEmail, recipient: data.selected_email });
+        }
+      }
+      if (currentWs) loadWorkspaceData(currentWs.id);
+    } catch (e) {
+      setActionMessage(`Failed to update email: ${e}`);
+    }
+  };
+
   const handleVerifyLead = async (leadId: number) => {
     try {
-      setActionMessage(`Verifying DNS MX & SMTP handshake for Lead #${leadId}...`);
+      setActionMessage(`Verifying DNS MX & RFC 5321 SMTP handshake for Lead #${leadId}...`);
       const res = await fetch(`${API_BASE}/leads/${leadId}/verify`, { method: "POST" });
       const data = await res.json();
       setActionMessage(`Lead #${leadId} verified! Result: ${data.email_status} (${data.selected_email || "no email"})`);
@@ -183,15 +244,23 @@ export default function Dashboard() {
     }
   };
 
-  const handleGenerateDrafts = async (leadId: number) => {
+  const handleBatchResearch = async () => {
+    if (!currentWs) return;
+    setBatchResearching(true);
+    setActionMessage("Synthesizing research & generating ready-to-send pitches for top 30 leads...");
     try {
-      setActionMessage(`Generating Day 0, Day 3, and Day 7 drafts for Lead #${leadId}...`);
-      const res = await fetch(`${API_BASE}/leads/${leadId}/generate-drafts`, { method: "POST" });
+      const res = await fetch(`${API_BASE}/leads/batch-research`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace_id: currentWs.id, limit: 30 }),
+      });
       const data = await res.json();
-      setActionMessage(`Generated ${data.count} drafts for Lead #${leadId}!`);
-      if (currentWs) loadWorkspaceData(currentWs.id);
+      setActionMessage(`Research complete! Generated ready-to-send pitches for ${data.researched_count} leads.`);
+      loadWorkspaceData(currentWs.id);
     } catch (e) {
-      setActionMessage(`Generation failed: ${e}`);
+      setActionMessage(`Batch research error: ${e}`);
+    } finally {
+      setBatchResearching(false);
     }
   };
 
@@ -204,6 +273,9 @@ export default function Dashboard() {
       });
       const data = await res.json();
       setActionMessage(`Draft #${draftId} marked as ${data.draft_status}!`);
+      if (pitchModalEmail && pitchModalEmail.draft_id === draftId) {
+        setPitchModalEmail({ ...pitchModalEmail, status: data.draft_status });
+      }
       if (currentWs) loadWorkspaceData(currentWs.id);
     } catch (e) {
       setActionMessage(`Approval update failed: ${e}`);
@@ -228,30 +300,6 @@ export default function Dashboard() {
     }
   };
 
-  const handleClayImport = async (tableId: string = "t_0tocbgtMEc9fyVheti6") => {
-    if (!currentWs) return;
-    setClayImporting(true);
-    setActionMessage(`Ingesting ${clayImportLimit} records from Clay table '${tableId}'...`);
-    try {
-      const res = await fetch(`${API_BASE}/clay/import`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          table_id: tableId,
-          workspace_id: currentWs.id,
-          limit: clayImportLimit,
-        }),
-      });
-      const data = await res.json();
-      setActionMessage(`Clay import complete! Imported: ${data.imported}, Updated: ${data.updated}`);
-      loadWorkspaceData(currentWs.id);
-    } catch (e) {
-      setActionMessage(`Clay import error: ${e}`);
-    } finally {
-      setClayImporting(false);
-    }
-  };
-
   const filteredLeads = leads.filter((l) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
@@ -259,7 +307,9 @@ export default function Dashboard() {
       l.full_name?.toLowerCase().includes(q) ||
       l.company_name?.toLowerCase().includes(q) ||
       l.job_title?.toLowerCase().includes(q) ||
-      l.email?.toLowerCase().includes(q)
+      l.email?.toLowerCase().includes(q) ||
+      l.company_domain?.toLowerCase().includes(q) ||
+      l.city?.toLowerCase().includes(q)
     );
   });
 
@@ -306,20 +356,20 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Quick Clay Ingest Action & Status */}
+        {/* Global Actions */}
         <div className="flex items-center space-x-3">
           <button
-            onClick={() => handleClayImport("t_0tocbgtMEc9fyVheti6")}
-            disabled={clayImporting}
+            onClick={handleBatchResearch}
+            disabled={batchResearching}
             className="flex items-center space-x-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-3 py-1.5 rounded-lg border border-indigo-400/30 transition shadow-sm disabled:opacity-50"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${clayImporting ? "animate-spin" : ""}`} />
-            <span>{clayImporting ? "Importing Clay..." : "Ingest HMW Lead1"}</span>
+            <Sparkles className={`w-3.5 h-3.5 ${batchResearching ? "animate-spin" : ""}`} />
+            <span>{batchResearching ? "Researching..." : "Research Top 30 Leads"}</span>
           </button>
 
           <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
             <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Engine Ready</span>
+            <span>1,000 Leads Synced</span>
           </div>
         </div>
       </header>
@@ -337,7 +387,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Main Workspace Cockpit */}
+      {/* Main Container */}
       <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6">
         {/* Workspace Summary Bar */}
         {currentWs && (
@@ -372,16 +422,16 @@ export default function Dashboard() {
               <Database className="w-4 h-4 text-slate-400" />
             </div>
             <div className="text-2xl font-bold text-white mt-1.5">{stats.total_leads}</div>
-            <span className="text-[11px] text-slate-400">Sourced from Clay & CSV</span>
+            <span className="text-[11px] text-slate-400">All with Visible Work Email</span>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl">
             <div className="flex items-center justify-between text-emerald-400 text-xs">
-              <span>Verified Mailboxes</span>
+              <span>Verified / Direct</span>
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
             </div>
             <div className="text-2xl font-bold text-emerald-400 mt-1.5">{stats.verified_leads}</div>
-            <span className="text-[11px] text-slate-400">RFC 5321 250 OK / MX</span>
+            <span className="text-[11px] text-slate-400">Clay Direct / RFC Handshake</span>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl">
@@ -390,7 +440,7 @@ export default function Dashboard() {
               <Layers className="w-4 h-4 text-brand-400" />
             </div>
             <div className="text-2xl font-bold text-brand-400 mt-1.5">{stats.total_drafts}</div>
-            <span className="text-[11px] text-slate-400">Day 0 ➔ Day 3 ➔ Day 7</span>
+            <span className="text-[11px] text-slate-400">Ready to Send Pitch</span>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl">
@@ -408,7 +458,7 @@ export default function Dashboard() {
               <Send className="w-4 h-4 text-indigo-400" />
             </div>
             <div className="text-2xl font-bold text-indigo-400 mt-1.5">{stats.sent_emails}</div>
-            <span className="text-[11px] text-slate-400">Via Personal SMTP</span>
+            <span className="text-[11px] text-slate-400">Via SMTP / Gmail</span>
           </div>
         </div>
 
@@ -423,7 +473,7 @@ export default function Dashboard() {
             }`}
           >
             <Database className="w-4 h-4" />
-            <span>Leads & RFC Handshake ({leads.length})</span>
+            <span>Leads, Work Emails & Research ({leads.length})</span>
           </button>
 
           <button
@@ -435,7 +485,7 @@ export default function Dashboard() {
             }`}
           >
             <Mail className="w-4 h-4" />
-            <span>Human Review Gate & Sequence Drafts ({drafts.length})</span>
+            <span>Ready-to-Send Pitches ({drafts.length})</span>
           </button>
 
           <button
@@ -459,11 +509,11 @@ export default function Dashboard() {
             }`}
           >
             <UserX className="w-4 h-4" />
-            <span>Suppression & Compliance</span>
+            <span>Suppression List</span>
           </button>
         </div>
 
-        {/* Tab 1: Leads & Verification */}
+        {/* Tab 1: Leads, Work Emails & Research */}
         {activeTab === "leads" && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -471,7 +521,7 @@ export default function Dashboard() {
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                 <input
                   type="text"
-                  placeholder="Search leads, companies, or titles..."
+                  placeholder="Search name, company, email, or city..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="bg-slate-900 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 w-full focus:outline-none focus:border-brand-500"
@@ -492,18 +542,17 @@ export default function Dashboard() {
                     <tr>
                       <th className="py-3 px-4">Contact & Title</th>
                       <th className="py-3 px-4">Company & Domain</th>
-                      <th className="py-3 px-4">Candidate Mailbox</th>
-                      <th className="py-3 px-4">Verification Status</th>
-                      <th className="py-3 px-4">Outreach</th>
-                      <th className="py-3 px-4 text-right">Actions</th>
+                      <th className="py-3 px-4">Work Email (Visible)</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">HackMyWebsite Pitch</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
                     {filteredLeads.map((lead) => (
                       <tr key={lead.id} className="hover:bg-slate-850/50 transition-colors">
                         <td className="py-3 px-4">
-                          <div className="font-medium text-white">{lead.full_name}</div>
-                          <div className="text-slate-400 text-[11px]">{lead.job_title || "Tech Executive"}</div>
+                          <div className="font-semibold text-white">{lead.full_name}</div>
+                          <div className="text-slate-400 text-[11px] line-clamp-1">{lead.job_title || "Tech Executive"}</div>
                           {lead.linkedin_url && (
                             <a
                               href={lead.linkedin_url}
@@ -511,7 +560,7 @@ export default function Dashboard() {
                               rel="noreferrer"
                               className="text-brand-400 hover:underline text-[10px] inline-flex items-center space-x-0.5 mt-0.5"
                             >
-                              <span>LinkedIn</span>
+                              <span>LinkedIn Profile</span>
                               <ExternalLink className="w-2.5 h-2.5" />
                             </a>
                           )}
@@ -525,59 +574,83 @@ export default function Dashboard() {
                           </div>
                         </td>
 
+                        {/* Visible Work Email & Permutations Selector */}
                         <td className="py-3 px-4">
-                          {lead.email ? (
-                            <span className="font-mono text-slate-200 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
-                              {lead.email}
-                            </span>
-                          ) : (
-                            <div className="text-slate-400 text-[11px]">
-                              {lead.candidates.length > 0
-                                ? `${lead.candidates.length} permutations generated`
-                                : "No candidates"}
+                          <div className="space-y-1">
+                            <div className="flex items-center space-x-1.5">
+                              <span className="font-mono text-xs font-semibold text-cyan-300 bg-slate-950 px-2 py-0.5 rounded border border-cyan-800/40">
+                                {lead.email || "No email available"}
+                              </span>
+
+                              {lead.email && (
+                                <button
+                                  onClick={() => copyToClipboard(lead.email!, `lead-email-${lead.id}`)}
+                                  className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition"
+                                  title="Copy Work Email"
+                                >
+                                  {copiedId === `lead-email-${lead.id}` ? (
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
+                              )}
                             </div>
-                          )}
+
+                            {/* Dropdown for other candidate email permutations */}
+                            {lead.candidates.length > 1 && (
+                              <div className="text-[10px] text-slate-400 flex items-center space-x-1">
+                                <span>Switch:</span>
+                                <select
+                                  value={lead.email || ""}
+                                  onChange={(e) => handleSelectCandidateEmail(lead.id, e.target.value)}
+                                  className="bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-[10px] font-mono text-slate-300 focus:outline-none"
+                                >
+                                  {lead.candidates.map((c) => (
+                                    <option key={c.id} value={c.email}>
+                                      {c.email} ({c.pattern || "auto"})
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+                          </div>
                         </td>
 
+                        {/* Status */}
                         <td className="py-3 px-4">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${
-                              lead.email_status === "valid"
-                                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                                : lead.email_status === "mx_verified"
-                                ? "bg-blue-500/10 text-blue-400 border-blue-500/30"
-                                : lead.email_status === "catch_all"
-                                ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
-                                : lead.email_status === "invalid"
-                                ? "bg-rose-500/10 text-rose-400 border-rose-500/30"
-                                : "bg-slate-800 text-slate-400 border-slate-700"
-                            }`}
-                          >
-                            {lead.email_status}
-                          </span>
+                          <div className="space-y-1">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${
+                                lead.email_status === "valid"
+                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                                  : lead.email_status === "candidate" || lead.email_status === "selected"
+                                  ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/30"
+                                  : lead.email_status === "mx_verified"
+                                  ? "bg-blue-500/10 text-blue-400 border-blue-500/30"
+                                  : "bg-slate-800 text-slate-400 border-slate-700"
+                              }`}
+                            >
+                              {lead.email_status}
+                            </span>
+                            <div className="text-[10px] text-slate-400">
+                              {lead.outreach_status === "researched"
+                                ? "✨ Pitch Ready"
+                                : lead.outreach_status === "drafted"
+                                ? "📝 Drafted"
+                                : "New"}
+                            </div>
+                          </div>
                         </td>
 
-                        <td className="py-3 px-4">
-                          <span className="text-[11px] text-slate-400 capitalize">
-                            {lead.outreach_status.replace("_", " ")}
-                          </span>
-                        </td>
-
+                        {/* Actions: Open Research & Pitch */}
                         <td className="py-3 px-4 text-right space-x-2">
                           <button
-                            onClick={() => handleVerifyLead(lead.id)}
-                            className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] transition font-medium border border-slate-700"
-                            title="Run DNS MX & RFC 5321 SMTP Handshake"
+                            onClick={() => handleOpenPitchModal(lead)}
+                            className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-sm shadow-brand-500/20 transition border border-brand-400/30"
                           >
-                            Verify MX
-                          </button>
-
-                          <button
-                            onClick={() => handleGenerateDrafts(lead.id)}
-                            className="px-2.5 py-1 rounded bg-brand-600 hover:bg-brand-500 text-white text-[11px] transition font-medium border border-brand-500/40"
-                            title="Generate Day 0, Day 3, Day 7 Sequence"
-                          >
-                            Gen Sequence
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>Research & Pitch</span>
                           </button>
                         </td>
                       </tr>
@@ -585,8 +658,8 @@ export default function Dashboard() {
 
                     {filteredLeads.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="py-8 text-center text-slate-400 text-xs">
-                          No leads match the query. Click <strong>Ingest HMW Lead1</strong> above to import from Clay!
+                        <td colSpan={5} className="py-8 text-center text-slate-400 text-xs">
+                          No leads match the query.
                         </td>
                       </tr>
                     )}
@@ -597,15 +670,15 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Tab 2: Drafts & Human Review Gate */}
+        {/* Tab 2: Ready-to-Send Pitches (Drafts) */}
         {activeTab === "drafts" && (
           <div className="space-y-4">
             <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-center justify-between text-xs text-amber-300">
               <div className="flex items-center space-x-2">
                 <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
                 <span>
-                  <strong>Mandatory Human Gate:</strong> An email can NEVER be sent without explicit operator approval.
-                  Click "Approve for Send" before dispatching.
+                  <strong>Human Gate Active:</strong> Review the tailored research pitch before dispatching. You can open
+                  directly in your email client (`mailto:`) or approve for automated SMTP dispatch.
                 </span>
               </div>
             </div>
@@ -613,6 +686,10 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {drafts.map((draft) => {
                 const lead = leads.find((l) => l.id === draft.lead_id);
+                const mailtoUrl = lead?.email
+                  ? `mailto:${lead.email}?subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.body_text)}`
+                  : "";
+
                 return (
                   <div
                     key={draft.id}
@@ -621,7 +698,7 @@ export default function Dashboard() {
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-brand-500/10 text-brand-400 border border-brand-500/30">
-                          {draft.step === 0 ? "Day 0 • Initial" : draft.step === 1 ? "Day 3 • Value" : "Day 7 • Breakup"}
+                          {draft.step === 0 ? "Observation Pitch" : draft.step === 1 ? "Day 3 • Value" : "Day 7 • Breakup"}
                         </span>
 
                         <span
@@ -637,9 +714,11 @@ export default function Dashboard() {
                         </span>
                       </div>
 
-                      <div className="text-xs text-slate-300 font-medium">
-                        To: {lead?.full_name} ({lead?.company_name})
+                      <div className="text-xs text-slate-200">
+                        <span className="text-slate-400">To:</span> <strong className="font-semibold text-white">{lead?.full_name}</strong> ({lead?.company_name})
+                        <div className="font-mono text-cyan-300 text-[11px] mt-0.5">{lead?.email}</div>
                       </div>
+
                       <div className="text-xs text-white font-semibold line-clamp-1">
                         Subject: {draft.subject}
                       </div>
@@ -650,31 +729,60 @@ export default function Dashboard() {
                     </div>
 
                     <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2">
-                      {draft.status === "approved" ? (
+                      <div className="flex items-center space-x-1.5">
                         <button
-                          onClick={() => handleApproveDraft(draft.id, false)}
-                          className="text-[11px] px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                          onClick={() => copyToClipboard(`${draft.subject}\n\n${draft.body_text}`, `draft-copy-${draft.id}`)}
+                          className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs flex items-center space-x-1"
+                          title="Copy Subject and Body"
                         >
-                          Revoke Approval
+                          {copiedId === `draft-copy-${draft.id}` ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                          <span>Copy</span>
                         </button>
-                      ) : (
-                        <button
-                          onClick={() => handleApproveDraft(draft.id, true)}
-                          className="text-[11px] px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-medium border border-amber-500/40"
-                        >
-                          Approve for Send
-                        </button>
-                      )}
 
-                      <button
-                        onClick={() => handleSendDraft(draft.id)}
-                        disabled={draft.status !== "approved"}
-                        className="text-[11px] px-3 py-1 rounded bg-brand-600 hover:bg-brand-500 text-white font-medium border border-brand-500/40 disabled:opacity-40 disabled:cursor-not-allowed flex items-center space-x-1"
-                        title={draft.status !== "approved" ? "Approval required first" : "Send email via SMTP"}
-                      >
-                        <Send className="w-3 h-3" />
-                        <span>Dispatch SMTP</span>
-                      </button>
+                        {mailtoUrl && (
+                          <a
+                            href={mailtoUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="p-1.5 rounded bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 text-xs flex items-center space-x-1 font-medium"
+                            title="Open in Apple Mail, Outlook or Gmail"
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                            <span>Mail App</span>
+                          </a>
+                        )}
+                      </div>
+
+                      <div className="flex items-center space-x-1.5">
+                        {draft.status === "approved" ? (
+                          <button
+                            onClick={() => handleApproveDraft(draft.id, false)}
+                            className="text-[11px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                          >
+                            Revoke
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleApproveDraft(draft.id, true)}
+                            className="text-[11px] px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-medium border border-amber-500/40"
+                          >
+                            Approve
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => handleSendDraft(draft.id)}
+                          disabled={draft.status !== "approved"}
+                          className="text-[11px] px-2.5 py-1 rounded bg-brand-600 hover:bg-brand-500 text-white font-medium border border-brand-500/40 disabled:opacity-40 disabled:cursor-not-allowed flex items-center space-x-1"
+                        >
+                          <Send className="w-3 h-3" />
+                          <span>SMTP</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -682,7 +790,7 @@ export default function Dashboard() {
 
               {drafts.length === 0 && (
                 <div className="col-span-3 text-center py-12 text-slate-400 text-xs border border-dashed border-slate-800 rounded-xl">
-                  No drafts generated yet. In the Leads tab, click <strong>Gen Sequence</strong> on any contact to create Day 0, Day 3, and Day 7 drafts!
+                  No pitches generated yet. In the Leads tab, click <strong>Research & Pitch</strong> on any contact!
                 </div>
               )}
             </div>
@@ -740,7 +848,8 @@ export default function Dashboard() {
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4 max-w-2xl">
             <h2 className="text-sm font-semibold text-white">Automated Opt-Out & Suppression List</h2>
             <p className="text-xs text-slate-400">
-              Contacts or domains listed here are automatically suppressed by the mailer engine. Any draft targeting these addresses is automatically cancelled before dispatch.
+              Contacts or domains listed here are automatically suppressed by the mailer engine. Any draft targeting these
+              addresses is automatically cancelled before dispatch.
             </p>
             <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs text-slate-400 text-center">
               Zero active suppressions. When a prospect replies with "unsubscribe" or opts out, they are instantly added here.
@@ -748,6 +857,262 @@ export default function Dashboard() {
           </div>
         )}
       </main>
+
+      {/* Slide-Over / Modal: Research & Ready-to-Send Pitch */}
+      {pitchModalLead && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+              <div className="flex items-center space-x-3">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-600 flex items-center justify-center text-white">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-white flex items-center space-x-2">
+                    <span>{pitchModalLead.full_name}</span>
+                    <span className="text-xs font-normal text-slate-400">• {pitchModalLead.job_title}</span>
+                  </h2>
+                  <div className="text-xs text-slate-400 flex items-center space-x-2 mt-0.5">
+                    <span className="font-semibold text-slate-300">{pitchModalLead.company_name}</span>
+                    <span>({pitchModalLead.company_domain})</span>
+                    {pitchModalLead.linkedin_url && (
+                      <a
+                        href={pitchModalLead.linkedin_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-brand-400 hover:underline flex items-center space-x-0.5"
+                      >
+                        <span>LinkedIn</span>
+                        <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setPitchModalLead(null)}
+                className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {pitchLoading ? (
+                <div className="py-16 text-center space-y-3">
+                  <RefreshCw className="w-8 h-8 text-brand-400 animate-spin mx-auto" />
+                  <p className="text-xs text-slate-400">Analyzing company attack surface and crafting HackMyWebsite pitch...</p>
+                </div>
+              ) : (
+                <>
+                  {/* Section 1: Research Dossier */}
+                  {pitchModalDossier && (
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono uppercase text-brand-400 font-semibold tracking-wider flex items-center space-x-1.5">
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Prospect Intelligence & Security Research</span>
+                        </span>
+                        <span className="text-[10px] bg-brand-500/10 text-brand-300 px-2 py-0.5 rounded border border-brand-500/20">
+                          {pitchModalDossier.category}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800/80">
+                          <span className="text-slate-400 block text-[10px]">Business & Delivery Model</span>
+                          <span className="font-medium text-slate-200">{pitchModalDossier.business_model}</span>
+                        </div>
+                        <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800/80">
+                          <span className="text-slate-400 block text-[10px]">Recommended Pitch Angle</span>
+                          <span className="font-medium text-indigo-300">{pitchModalDossier.pitch_angle}</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5 pt-1">
+                        <span className="text-[11px] font-medium text-slate-300 block">Key Attack Surface Findings:</span>
+                        <ul className="space-y-1 text-xs text-slate-400">
+                          {pitchModalDossier.findings.map((f: string, i: number) => (
+                            <li key={i} className="flex items-start space-x-2">
+                              <span className="text-brand-400 mt-1">•</span>
+                              <span>{f}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Section 2: Ready-to-Send Email Pitch */}
+                  {pitchModalEmail && (
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono uppercase text-emerald-400 font-semibold tracking-wider flex items-center space-x-1.5">
+                          <Mail className="w-3.5 h-3.5" />
+                          <span>Ready-to-Send Pitch: HackMyWebsite</span>
+                        </span>
+
+                        <span
+                          className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
+                            pitchModalEmail.status === "approved"
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                              : "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                          }`}
+                        >
+                          {pitchModalEmail.status === "approved" ? "Approved for Send" : "Draft (Review Required)"}
+                        </span>
+                      </div>
+
+                      {/* Recipient & Work Email Switcher */}
+                      <div className="flex items-center justify-between text-xs bg-slate-900 p-2.5 rounded-lg border border-slate-800">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-slate-400">To:</span>
+                          <span className="font-mono font-semibold text-cyan-300">{pitchModalEmail.recipient}</span>
+                        </div>
+
+                        {pitchModalLead.candidates.length > 1 && (
+                          <div className="flex items-center space-x-1.5">
+                            <span className="text-slate-400 text-[10px]">Select Alternate:</span>
+                            <select
+                              value={pitchModalEmail.recipient}
+                              onChange={(e) => handleSelectCandidateEmail(pitchModalLead.id, e.target.value)}
+                              className="bg-slate-950 border border-slate-700 text-xs font-mono rounded px-2 py-1 text-slate-200"
+                            >
+                              {pitchModalLead.candidates.map((c) => (
+                                <option key={c.id} value={c.email}>
+                                  {c.email}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Subject Line */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] text-slate-400 font-medium">Subject Line</label>
+                        <div className="flex items-center justify-between bg-slate-900 border border-slate-800 px-3 py-2 rounded-lg text-xs font-medium text-white">
+                          <span>{pitchModalEmail.subject}</span>
+                          <button
+                            onClick={() => copyToClipboard(pitchModalEmail.subject, "modal-subject")}
+                            className="p-1 text-slate-400 hover:text-white"
+                            title="Copy Subject"
+                          >
+                            {copiedId === "modal-subject" ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Email Body */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] text-slate-400 font-medium">Email Body (Zero AI Buzzwords)</label>
+                          <button
+                            onClick={() => copyToClipboard(pitchModalEmail.body_text, "modal-body")}
+                            className="text-[11px] text-brand-400 hover:underline flex items-center space-x-1"
+                          >
+                            {copiedId === "modal-body" ? (
+                              <span className="text-emerald-400">Copied Body!</span>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3" />
+                                <span>Copy Body</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                        <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-lg text-xs text-slate-200 font-mono whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
+                          {pitchModalEmail.body_text}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer / Dispatch Actions */}
+            {pitchModalEmail && (
+              <div className="px-6 py-4 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() =>
+                      copyToClipboard(
+                        `${pitchModalEmail.subject}\n\n${pitchModalEmail.body_text}`,
+                        "modal-full-copy"
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 flex items-center space-x-1.5"
+                  >
+                    {copiedId === "modal-full-copy" ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-400">Copied Full Email!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Full Email</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Mailto Link (Open in Gmail / Apple Mail) */}
+                  <a
+                    href={`mailto:${pitchModalEmail.recipient}?subject=${encodeURIComponent(
+                      pitchModalEmail.subject
+                    )}&body=${encodeURIComponent(pitchModalEmail.body_text)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-medium border border-indigo-500/40 flex items-center space-x-1.5"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Open in Gmail / Mail App</span>
+                  </a>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  {pitchModalEmail.draft_id && (
+                    <>
+                      {pitchModalEmail.status === "approved" ? (
+                        <button
+                          onClick={() => handleApproveDraft(pitchModalEmail.draft_id!, false)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700"
+                        >
+                          Revoke Approval
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleApproveDraft(pitchModalEmail.draft_id!, true)}
+                          className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium border border-amber-500/40"
+                        >
+                          Approve for Send
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => handleSendDraft(pitchModalEmail.draft_id!)}
+                        disabled={pitchModalEmail.status !== "approved"}
+                        className="px-4 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold border border-brand-500/40 disabled:opacity-40 disabled:cursor-not-allowed flex items-center space-x-1.5 shadow-sm"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Dispatch SMTP</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

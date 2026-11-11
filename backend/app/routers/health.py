@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.core.database import get_db
-from app.core.config import settings
+from app.core.config import settings, DATA_DIR
 
 router = APIRouter(prefix="/api/health", tags=["Health"])
 
@@ -16,7 +16,7 @@ def health_check(db: Session = Depends(get_db)):
     except Exception as e:
         db_status = f"error: {e}"
 
-    disk_usage = shutil.disk_usage(settings.DATA_DIR)
+    disk_usage = shutil.disk_usage(DATA_DIR)
     free_gb = round(disk_usage.free / (1024 ** 3), 2)
 
     return {
