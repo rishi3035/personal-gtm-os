@@ -65,16 +65,17 @@ class EmailVerifier:
         try:
             s = socket.create_connection((mx_host, 25), timeout=timeout)
         except (socket.timeout, socket.error, OSError) as e:
-            # Many residential ISPs block outbound Port 25.
-            # In that case, DNS MX verification succeeds and we flag port 25 block.
+            # Many residential/office ISPs block outbound Port 25.
+            # MX presence alone DOES NOT prove mailbox existence.
+            # Must remain unverified (score 20) to strictly prevent false positives / bluff emails.
             return {
                 "email": email,
-                "status": "mx_verified",
-                "score": 60,
+                "status": "port_25_blocked",
+                "score": 20,
                 "mx_found": True,
                 "mx_host": mx_host,
                 "is_catch_all": False,
-                "reason": f"MX valid, Port 25 blocked by local network ({e})"
+                "reason": f"Domain MX exists ({mx_host}), but local Port 25 blocked ({e}). Mailbox unverified."
             }
 
         try:

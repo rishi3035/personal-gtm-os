@@ -22,6 +22,7 @@ class Lead(Base):
     state = Column(String(128), nullable=True)
     country = Column(String(128), nullable=True)
     linkedin_url = Column(String(512), nullable=True)
+    phone = Column(String(64), nullable=True)
     
     # Best Verified Email
     email = Column(String(256), nullable=True, index=True)
@@ -35,6 +36,13 @@ class Lead(Base):
     
     # Outreach status
     outreach_status = Column(String(64), default="new")  # new, drafted, approved, day0_sent, day3_sent, day7_sent, replied, bounced, opted_out
+
+    # Predicted Plan & Deal Revenue Pipeline (HackMyWebsite.io tiers)
+    predicted_plan = Column(String(64), default="agency")  # agency (₹4,999/mo), pro (₹2,999/mo), starter (₹1,999/mo), enterprise (₹9,999/mo)
+    plan_price_monthly = Column(Integer, default=4999)
+    plan_price_annual = Column(Integer, default=59988)
+    deal_status = Column(String(64), default="need_to_send")  # need_to_send, sent, in_discussion, won, said_no
+    deal_notes = Column(Text, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

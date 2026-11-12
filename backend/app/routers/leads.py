@@ -12,7 +12,19 @@ from app.core.database import get_db
 from app.models.lead import Lead, EmailCandidate
 from app.models.workspace import Workspace
 from app.models.email import EmailDraft
-from app.schemas.lead import LeadResponse, LeadCreate, LeadStats
+from app.schemas.lead import (
+    LeadResponse, LeadCreate, LeadStats, UpdateDealStatusRequest,
+    SovereignLookupRequest, AutonomousLeadGenRequest
+)
+from app.services.sovereign_enrichment_service import SovereignEnrichmentService
+from app.services.sovereign_lead_generator import SovereignLeadGenerator
+
+PLAN_PRICES = {
+    "agency": {"monthly": 4999, "annual": 59988, "name": "Agency Tier"},
+    "pro": {"monthly": 2999, "annual": 35988, "name": "Pro Tier"},
+    "starter": {"monthly": 1999, "annual": 23988, "name": "Starter Tier"},
+    "enterprise": {"monthly": 9999, "annual": 119988, "name": "Agency Enterprise"}
+}
 from app.services.verifier_service import EmailVerifier
 from app.services.personalization_service import PersonalizationService
 from app.services.research_pitch_service import ResearchPitchService
@@ -121,9 +133,14 @@ def verify_lead_emails(lead_id: int, db: Session = Depends(get_db)):
 
         results.append(res)
 
-    if best_candidate and highest_score >= 50:
+    # Strict Zero Bluff Policy: Only promote if truly verified via RFC 5321 250 OK (score >= 90)
+    if best_candidate and highest_score >= 90:
         lead.email = best_candidate.email
-        lead.email_status = best_candidate.status
+        lead.email_status = "verified"
+        lead.email_score = highest_score
+    elif not lead.email_status or lead.email_status in ("candidate", "untested"):
+        lead.email = None
+        lead.email_status = "unverified"
         lead.email_score = highest_score
 
     db.commit()
@@ -135,6 +152,20 @@ def verify_lead_emails(lead_id: int, db: Session = Depends(get_db)):
         "email_score": lead.email_score,
         "results": results
     }
+
+@router.post("/{lead_id}/waterfall-enrich")
+def waterfall_enrich_lead(lead_id: int, db: Session = Depends(get_db)):
+    """
+    Executes real multi-vendor waterfall enrichment:
+    Clay Routine Cascade (Findymail, Dropcontact, Hunter, Prospeo, etc.) -> Sovereign Site Recon -> Zero Bluff Verification.
+    """
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    from app.services.waterfall_enrichment_service import WaterfallEnrichmentService
+    res = WaterfallEnrichmentService.enrich_lead_waterfall(lead=lead, db=db)
+    return res
 
 @router.post("/{lead_id}/generate-drafts")
 def generate_drafts(lead_id: int, db: Session = Depends(get_db)):
@@ -251,7 +282,8 @@ def research_and_pitch_lead(lead_id: int, db: Session = Depends(get_db)):
             "subject": draft.subject if draft else pitch["subject"],
             "body_text": draft.body_text if draft else pitch["body_text"],
             "status": draft.status if draft else "draft"
-        }
+        },
+        "sequence": result.get("sequence", {})
     }
 
 @router.post("/batch-research")
@@ -329,6 +361,59 @@ def select_lead_email(lead_id: int, payload: SelectEmailRequest, db: Session = D
         "email_status": lead.email_status
     }
 
+@router.put("/{lead_id}/deal-status")
+def update_lead_deal_status(lead_id: int, payload: UpdateDealStatusRequest, db: Session = Depends(get_db)):
+    """
+    Updates a lead's pipeline deal stage and predicted plan tier.
+    If deal_status is set to 'said_no', this lead is marked as passed/lost and
+    their estimated revenue will immediately decrease on the dashboard.
+    """
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    old_status = lead.deal_status
+    old_mrr = lead.plan_price_monthly or 4999
+
+    # Update plan tier if provided
+    if payload.predicted_plan:
+        plan_key = payload.predicted_plan.lower()
+        if plan_key in PLAN_PRICES:
+            lead.predicted_plan = plan_key
+            lead.plan_price_monthly = PLAN_PRICES[plan_key]["monthly"]
+            lead.plan_price_annual = PLAN_PRICES[plan_key]["annual"]
+
+    lead.deal_status = payload.deal_status.lower()
+    if payload.deal_notes:
+        lead.deal_notes = payload.deal_notes
+
+    if payload.deal_status == "said_no":
+        lead.outreach_status = "rejected"
+    elif payload.deal_status == "won":
+        lead.outreach_status = "replied"
+    elif payload.deal_status == "sent":
+        lead.outreach_status = "day0_sent"
+
+    lead.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(lead)
+
+    return {
+        "status": "success",
+        "lead_id": lead.id,
+        "company_name": lead.company_name,
+        "predicted_plan": lead.predicted_plan,
+        "plan_price_monthly": lead.plan_price_monthly,
+        "plan_price_annual": lead.plan_price_annual,
+        "deal_status": lead.deal_status,
+        "previous_status": old_status,
+        "mrr_delta": 0 if old_status == "said_no" and lead.deal_status == "said_no" else (
+            -lead.plan_price_monthly if lead.deal_status == "said_no" else (
+                lead.plan_price_monthly if old_status == "said_no" else 0
+            )
+        )
+    }
+
 @router.get("/export/excel")
 def export_leads_excel(workspace_id: int = 1, db: Session = Depends(get_db)):
     """
@@ -357,12 +442,16 @@ def export_leads_csv(workspace_id: int = 1, db: Session = Depends(get_db)):
         "S.No", "Lead ID", "Full Name", "First Name", "Last Name",
         "Job Title", "Company Name", "Inferred Domain", "Location",
         "LinkedIn URL", "Work Email", "Email Status",
+        "Predicted Plan (hackmywebsite.io)", "Est. MRR (INR)", "Pipeline Deal Status",
         "Pitch Subject Line", "Pitch Email Body", "Strategy Angle"
     ]
     writer.writerow(headers)
 
     for idx, l in enumerate(leads, 1):
         draft = db.query(EmailDraft).filter(EmailDraft.lead_id == l.id, EmailDraft.step == 0).first()
+        is_said_no = l.deal_status == "said_no"
+        mrr_val = 0 if is_said_no else (l.plan_price_monthly or 4999)
+
         writer.writerow([
             idx,
             l.id,
@@ -376,6 +465,9 @@ def export_leads_csv(workspace_id: int = 1, db: Session = Depends(get_db)):
             l.linkedin_url,
             l.email or "",
             l.email_status,
+            (l.predicted_plan or "agency").upper(),
+            mrr_val,
+            (l.deal_status or "need_to_send").replace("_", " ").upper(),
             draft.subject if draft else "",
             draft.body_text if draft else "",
             draft.hook_rationale if draft else ""
@@ -388,5 +480,97 @@ def export_leads_csv(workspace_id: int = 1, db: Session = Depends(get_db)):
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+@router.post("/sovereign-lookup")
+async def sovereign_lookup(payload: SovereignLookupRequest):
+    """
+    Sovereign, 100% Free Lead & Phone Enrichment.
+    Zero third-party SaaS dependency (no Apollo, no Clay, no Hunter).
+    Extracts direct founder WhatsApp numbers, tel: anchors, and corporate contact details.
+    """
+    result = await SovereignEnrichmentService.enrich_lead(
+        domain=payload.domain,
+        company_name=payload.company_name or "",
+        contact_name=payload.contact_name or ""
+    )
+    return {
+        "status": "success",
+        "enrichment": result
+    }
+
+@router.post("/{lead_id}/sovereign-enrich")
+async def sovereign_enrich_lead(lead_id: int, db: Session = Depends(get_db)):
+    """
+    Auto-enriches an existing lead in the database using the sovereign zero-cost engine.
+    If a verified phone or WhatsApp number is found, it automatically saves to SQLite.
+    """
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    result = await SovereignEnrichmentService.enrich_lead(
+        domain=lead.company_domain or "",
+        company_name=lead.company_name or "",
+        contact_name=lead.full_name or ""
+    )
+
+    if result.get("primary_phone"):
+        lead.phone = result["primary_phone"]
+
+    # Update enrichment data
+    try:
+        current_data = json.loads(lead.enrichment_data) if lead.enrichment_data else {}
+    except Exception:
+        current_data = {}
+
+    current_data["sovereign_phone_enrichment"] = {
+        "phone": result.get("primary_phone"),
+        "phone_type": result.get("phone_type"),
+        "whatsapp_link": result.get("whatsapp_link"),
+        "confidence": result.get("confidence_score"),
+        "source": result.get("source"),
+        "all_phones": [p.get("formatted") for p in result.get("all_phones", [])],
+        "findings": result.get("findings", [])
+    }
+    lead.enrichment_data = json.dumps(current_data, ensure_ascii=False)
+    lead.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(lead)
+
+    return {
+        "status": "success",
+        "lead_id": lead.id,
+        "full_name": lead.full_name,
+        "company_name": lead.company_name,
+        "phone": lead.phone,
+        "enrichment": result
+    }
+
+@router.post("/generate-autonomous")
+async def generate_autonomous_leads(
+    payload: AutonomousLeadGenRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Stage 2 Sovereign Lead Operations.
+    Performs autonomous live web search, profiles target niche accounts,
+    extracts C-Suite leadership (Founder, Co-Founder, CTO, COO),
+    validates deliverable mailboxes via DNS MX, generates bespoke pitches,
+    and ingests directly into gtm.db.
+    100% Free • Zero third-party SaaS dependency.
+    """
+    result = await SovereignLeadGenerator.run_autonomous_stage2_pipeline(
+        db=db,
+        niche=payload.niche or "D2C Brands",
+        company_type=payload.company_type or "All",
+        geography=payload.geography or "Bengaluru",
+        headcount=payload.headcount or "11-50",
+        target_roles=payload.target_roles or ["Founder", "CEO", "CTO", "COO"],
+        count=payload.count or 10,
+        workspace_id=payload.workspace_id or 1
+    )
+    return result
+
+
 
 

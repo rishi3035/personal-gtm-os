@@ -114,7 +114,7 @@ class ResearchPitchService:
             category = "Web & App Development Agency"
             pitch_angle = "Agency White-Label Security Handover Engine (₹50k/mo Upsell)"
 
-        # Assemble full authentic human-written body text
+        # Assemble full authentic human-written body text for Step 0 Cold Email
         body_text = (
             f"Hi {first_name},\n\n"
             f"{hook}\n\n"
@@ -130,6 +130,63 @@ class ResearchPitchService:
             f"W: https://aiviintelligence.com | https://hackmywebsite.io"
         )
 
+        # Step 2A: Demo Walkthrough Pitch (When prospect replies YES / interested)
+        demo_subject = f"Re: {subject} — HackMyWebsite demo walkthrough"
+        demo_body = (
+            f"Hi {first_name},\n\n"
+            f"Great to connect! I would love to walk you through how HackMyWebsite slots directly into "
+            f"{company}'s client handoff pipeline.\n\n"
+            f"We can do a quick 15-minute screen share where I'll:\n"
+            f"1. Run a live 90-second automated scan on one of your public or staging URLs in real time.\n"
+            f"2. Walk you through the AI Launch Score (0–100) and 1-click Claude Code / Cursor AST prompt fixes.\n"
+            f"3. Show you how the white-label agency PDF looks with your agency's logo for client sign-offs.\n\n"
+            f"Would Thursday at 3:00 PM or Friday at 11:30 AM IST work for a brief Google Meet?\n\n"
+            f"Alternatively, feel free to pick any slot that fits your schedule: https://cal.com/rishikesh-raj/15min\n\n"
+            f"Best regards,\n\n"
+            f"Rishikesh Raj\n"
+            f"Chief Operating Officer\n"
+            f"AIVI Intelligence Private Limited\n"
+            f"E: rishikesh@aiviintelligence.com | W: https://hackmywebsite.io"
+        )
+
+        # Step 2B: Bump Follow-Up (Day 3 - When no reply)
+        followup_subject = f"Re: {subject}"
+        followup_body = (
+            f"Hi {first_name},\n\n"
+            f"Following up on my note from earlier this week.\n\n"
+            f"Most engineering leaders at web agencies tell us their biggest bottleneck with manual security audits "
+            f"is turnaround time and cost ($3,000+ per engagement). HackMyWebsite catches common OWASP Top 10 risks, "
+            f"misconfigured CORS/CSP headers, and exposed keys in under 90 seconds.\n\n"
+            f"Happy to run a complimentary baseline scan for {company} if you want to see a sample report for your next sprint review.\n\n"
+            f"Let me know if that is relevant for you right now.\n\n"
+            f"Best,\n"
+            f"Rishikesh"
+        )
+
+        # Step 3: Breakup / Closing Loop (Day 7 - When still no reply)
+        breakup_subject = f"Closing the loop: {company}"
+        breakup_body = (
+            f"Hi {first_name},\n\n"
+            f"I haven't heard back, so I assume automated client security signoffs aren't a priority for {company} this quarter.\n\n"
+            f"I won't clutter your inbox further. If you ever want to benchmark your client web applications or staging builds, "
+            f"you can run a direct scan anytime at https://hackmywebsite.io.\n\n"
+            f"Wishing you and the {company} team continued success.\n\n"
+            f"Best regards,\n"
+            f"Rishikesh Raj\n"
+            f"COO, AIVI Intelligence"
+        )
+
+        # Step 4: Rejection Acknowledgment (When agency says NO)
+        rejection_subject = f"Re: {subject}"
+        rejection_body = (
+            f"Hi {first_name},\n\n"
+            f"Understood! Thanks for letting me know.\n\n"
+            f"Wishing you and the {company} team all the best with your upcoming builds. If you ever need automated "
+            f"client security clearances down the line, feel free to test us anytime at https://hackmywebsite.io.\n\n"
+            f"Best,\n"
+            f"Rishikesh"
+        )
+
         dossier = {
             "category": category,
             "segment": segment,
@@ -143,7 +200,7 @@ class ResearchPitchService:
                 f"Remediation hook: Automated 90-sec DAST/SAST scan + 1-click Cursor/Claude AST prompt fixes",
                 f"Agency upsell capability: ₹30,000–₹50,000 one-time clearance fee + ₹20,000–₹40,000/mo retainer"
             ],
-            "recommended_next_step": "Dispatch outreach pitch via email client or GTM OS review gate"
+            "recommended_next_step": "Dispatch outreach pitch via Zoho Mail or GTM OS review gate"
         }
 
         return {
@@ -153,5 +210,37 @@ class ResearchPitchService:
                 "subject": subject,
                 "body_text": body_text,
                 "hook_rationale": f"Calibrated 6-block B2B strategy for {segment}: {pitch_angle}"
+            },
+            "sequence": {
+                "initial_cold": {
+                    "step": 0,
+                    "title": "Step 1: Cold Initial Pitch (Day 0)",
+                    "subject": subject,
+                    "body_text": body_text,
+                },
+                "demo_walkthrough": {
+                    "step": "demo",
+                    "title": "If Prospect Says YES: Demo & Live Walkthrough",
+                    "subject": demo_subject,
+                    "body_text": demo_body,
+                },
+                "followup_day3": {
+                    "step": 1,
+                    "title": "If No Reply (Day 3): Bump Follow-up",
+                    "subject": followup_subject,
+                    "body_text": followup_body,
+                },
+                "breakup_day7": {
+                    "step": 2,
+                    "title": "If Still No Reply (Day 7): Closing the Loop",
+                    "subject": breakup_subject,
+                    "body_text": breakup_body,
+                },
+                "rejection": {
+                    "step": "rejection",
+                    "title": "If Agency Says NO: Polite Closure",
+                    "subject": rejection_subject,
+                    "body_text": rejection_body,
+                }
             }
         }

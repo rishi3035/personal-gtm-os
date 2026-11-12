@@ -7,7 +7,9 @@ venv/
 ENV/
 *.sqlite3
 *.db
+*.db-journal
 data/*.db
+data/*.db-journal
 !data/.gitkeep
 
 # Node & Next.js

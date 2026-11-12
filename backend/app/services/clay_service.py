@@ -22,25 +22,16 @@ def clean_company_name_for_domain(company_name: str) -> str:
 class ClayService:
     @staticmethod
     def run_cli_command(args: List[str]) -> Dict[str, Any]:
-        """Execute clay CLI command and return parsed JSON."""
-        cmd = [settings.CLAY_CLI_PATH] + args
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=False
-            )
-            if result.returncode != 0:
-                logger.error(f"Clay CLI error (code {result.returncode}): {result.stderr}")
-                try:
-                    return json.loads(result.stdout)
-                except Exception:
-                    return {"error": result.stderr or f"Clay CLI returned code {result.returncode}"}
-            return json.loads(result.stdout)
-        except Exception as e:
-            logger.exception("Failed to run Clay CLI command")
-            return {"error": str(e)}
+        """
+        STRICT CREDIT PROTECTION BARRIER:
+        Clay CLI calls are hard-disabled to guarantee ZERO credit consumption.
+        The operating system operates 100% sovereignly with zero third-party dependencies.
+        """
+        logger.warning(f"Blocked Clay CLI execution ({args}) to protect user credits. Sovereign mode active.")
+        return {
+            "status": "blocked",
+            "message": "Clay CLI integration is permanently disabled to protect user account credits. Use 100% sovereign research endpoints."
+        }
 
     @classmethod
     def list_tables(cls) -> Dict[str, Any]:

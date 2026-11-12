@@ -41,7 +41,9 @@ class ExportService:
         headers_sheet1 = [
             "S.No", "Lead ID", "Full Name", "First Name", "Last Name",
             "Job Title", "Company Name", "Inferred Domain", "Location",
-            "LinkedIn Profile URL", "Work Email", "Email Status", "Candidate Count"
+            "LinkedIn Profile URL", "Work Email", "Email Status",
+            "Predicted Plan (hackmywebsite.io)", "Est. Monthly Revenue (INR)",
+            "Est. Annual Revenue (INR)", "Pipeline Deal Status", "Deal Notes"
         ]
 
         ws1.append(headers_sheet1)
@@ -54,6 +56,10 @@ class ExportService:
         ws1.row_dimensions[1].height = 26
 
         for idx, l in enumerate(leads, 1):
+            is_said_no = l.deal_status == "said_no"
+            mrr_val = 0 if is_said_no else (l.plan_price_monthly or 4999)
+            arr_val = 0 if is_said_no else (l.plan_price_annual or 59988)
+
             row_data = [
                 idx,
                 l.id,
@@ -67,7 +73,11 @@ class ExportService:
                 l.linkedin_url,
                 l.email or "",
                 l.email_status,
-                len(l.candidates)
+                (l.predicted_plan or "agency").upper(),
+                mrr_val,
+                arr_val,
+                (l.deal_status or "need_to_send").replace("_", " ").upper(),
+                l.deal_notes or ""
             ]
             ws1.append(row_data)
             row_idx = idx + 1
@@ -96,7 +106,8 @@ class ExportService:
 
         headers_sheet2 = [
             "S.No", "Lead Name", "Job Title", "Company Name", "Target Domain",
-            "Work Email", "Email Status", "Pitch Subject Line", "Pitch Email Body",
+            "Work Email", "Predicted Plan", "Est. MRR (INR)", "Pipeline Status",
+            "Pitch Subject Line", "Pitch Email Body",
             "Hook Strategy / Angle", "Draft Status"
         ]
 
@@ -115,6 +126,8 @@ class ExportService:
             body = draft.body_text if draft else ""
             rationale = draft.hook_rationale if draft else ""
             status = draft.status if draft else "draft"
+            is_said_no = l.deal_status == "said_no"
+            mrr_val = 0 if is_said_no else (l.plan_price_monthly or 4999)
 
             row_data = [
                 idx,
@@ -123,7 +136,9 @@ class ExportService:
                 l.company_name,
                 l.company_domain,
                 l.email or "",
-                l.email_status,
+                (l.predicted_plan or "agency").upper(),
+                mrr_val,
+                (l.deal_status or "need_to_send").replace("_", " ").upper(),
                 subject,
                 body,
                 rationale,

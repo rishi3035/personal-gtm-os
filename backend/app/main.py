@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import engine, Base, SessionLocal
 from app.models import workspace, lead, email, suppression, operator
-from app.routers import health, workspaces, clay, leads, email_drafts, suppression as suppression_router, operator as operator_router
+from app.routers import health, workspaces, clay, leads, email_drafts, suppression as suppression_router, operator as operator_router, discovery
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -36,6 +36,7 @@ app.include_router(leads.router)
 app.include_router(email_drafts.router)
 app.include_router(suppression_router.router)
 app.include_router(operator_router.router)
+app.include_router(discovery.router)
 
 @app.on_event("startup")
 def seed_default_data():

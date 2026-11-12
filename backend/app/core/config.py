@@ -17,9 +17,9 @@ class Settings(BaseSettings):
     DATABASE_PATH: Path = DATA_DIR / "gtm.db"
     DATABASE_URL: str = f"sqlite:///{DATABASE_PATH}"
     
-    # Clay Integration
-    CLAY_CLI_PATH: str = os.path.expanduser("~/.local/bin/clay")
-    CLAY_API_KEY: str = os.getenv("CLAY_API_KEY", "")
+    # Clay Integration (Permanently disabled to protect credits)
+    CLAY_CLI_PATH: str = ""
+    CLAY_API_KEY: str = ""
     
     # SMTP Defaults (Configurable per user/campaign)
     SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
@@ -36,5 +36,6 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = True
+        extra = "ignore"
 
 settings = Settings()
